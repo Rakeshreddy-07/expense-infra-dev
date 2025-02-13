@@ -14,3 +14,8 @@ output "vpc_id_info" {
 output "public_subnet_id_info" {
     value = module.vpc.public_subnet_id
 }
+
+output "db_subnet_group" {
+    value = aws_db_subnet_group.expense.name
+  
+}

@@ -25,3 +25,10 @@ resource "aws_ssm_parameter" "database_subnet_id" {
   value = join(",", module.vpc.database_subnet_id)
 
 }
+
+resource "aws_ssm_parameter" "database_subnet_group" {
+  name  = "/${var.project}/${var.environment}/database_subnet_group"
+  type  = "String"
+  value = aws_db_subnet_group.expense.name
+
+}
