@@ -20,3 +20,8 @@ variable "domain_name" {
     default = "devopsaws82s.online"
   
 }
+
+variable "zone_id" {
+    default = "Z07890142HXNMPPOLRJE3"
+  
+}

@@ -53,6 +53,18 @@ module "app_alb_sg" {
     sg_name = "app_alb"
 }
 
+module "web_alb_sg" {
+    source = "git::https://github.com/Rakeshreddy-07/terraform-aws-securitygroup.git?ref=main"
+    project = var.project
+    environment = var.environment
+    common_tags = var.common_tags
+    sg_tags = var.sg_tags
+    description = "created for web alb"
+    vpc_id = data.aws_ssm_parameter.vpc_id.value
+    sg_name = "web_alb"
+}
+
+
 #VPN SG #ports 22,443,1194,943
 module "vpn_sg" {
     source = "git::https://github.com/Rakeshreddy-07/terraform-aws-securitygroup.git?ref=main"
@@ -157,4 +169,40 @@ resource "aws_security_group_rule" "backend_vpn" {
   protocol          = "tcp"
   source_security_group_id       = module.vpn_sg.sg_id
   security_group_id = module.backend_sg.sg_id
+}
+
+resource "aws_security_group_rule" "backend_mysql" {
+  type              = "ingress"
+  from_port         = 3306
+  to_port           = 3306
+  protocol          = "tcp"
+  source_security_group_id       = module.backend_sg.sg_id
+  security_group_id = module.mysql_sg.sg_id
+}
+
+resource "aws_security_group_rule" "backend_vpn_http" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  source_security_group_id       = module.vpn_sg.sg_id
+  security_group_id = module.backend_sg.sg_id
+}
+
+resource "aws_security_group_rule" "alb_backend_allow" {
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  source_security_group_id       = module.app_alb_sg.sg_id
+  security_group_id = module.backend_sg.sg_id
+}
+
+resource "aws_security_group_rule" "web_alb_https" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = module.web_alb_sg.sg_id
 }
