@@ -1,8 +1,8 @@
-resource "aws_instance" "backend" {
+resource "aws_instance" "frontend" {
   ami                    = data.aws_ami.joindevops.id
-  vpc_security_group_ids = [data.aws_ssm_parameter.backend_sg_id.value]
+  vpc_security_group_ids = [data.aws_ssm_parameter.frontend_sg_id.value]
   instance_type          = "t3.micro"
-  subnet_id = local.private_subnet_id[0]
+  subnet_id = local.public_subnet_id[0]
   tags = merge(
     var.common_tags,
     {
@@ -15,13 +15,13 @@ resource "aws_instance" "backend" {
 resource "null_resource" "cluster" {
   # Changes to any instance of the cluster requires re-provisioning
   triggers = {
-    cluster_instance_ids = aws_instance.backend.id
+    cluster_instance_ids = aws_instance.frontend.id
   }
 
   # Bootstrap script can run on any instance of the cluster
   # So we just choose the first in this case
   connection {
-    host = aws_instance.backend.private_ip
+    host = aws_instance.frontend.public_ip
     type = "ssh"
     user     = "ec2-user"
     password = "DevOps321"
@@ -29,43 +29,43 @@ resource "null_resource" "cluster" {
   }
 
     provisioner "file" {
-        source = "backend.sh"
-        destination = "/tmp/backend.sh"
+        source = "frontend.sh"
+        destination = "/tmp/frontend.sh"
       
     }
 
   provisioner "remote-exec" {
-    # Bootstrap script called with private_ip of each node in the cluster
+    # Bootstrap script called with public_ip of each node in the cluster
     inline = [
-      "chmod +X /tmp/backend.sh",
-      "sudo sh /tmp/backend.sh ${var.environment}"
+      "chmod +X /tmp/frontend.sh",
+      "sudo sh /tmp/frontend.sh ${var.environment}"
     ]
   }
 }
 
-resource "aws_ec2_instance_state" "backend" {
-  instance_id = aws_instance.backend.id
+resource "aws_ec2_instance_state" "frontend" {
+  instance_id = aws_instance.frontend.id
   state       = "stopped"
   depends_on = [ null_resource.cluster ]
 }
 
-resource "aws_ami_from_instance" "backend" {
+resource "aws_ami_from_instance" "frontend" {
   name               = local.resource_name
-  source_instance_id = aws_instance.backend.id
-  depends_on = [ aws_ec2_instance_state.backend ]
+  source_instance_id = aws_instance.frontend.id
+  depends_on = [ aws_ec2_instance_state.frontend ]
 }
 
-resource "null_resource" "backend" {
+resource "null_resource" "frontend" {
   provisioner "local-exec" {
-    command = "aws ec2 terminate-instances --instance-ids ${aws_instance.backend.id}"
+    command = "aws ec2 terminate-instances --instance-ids ${aws_instance.frontend.id}"
   }
 
-depends_on = [ aws_ami_from_instance.backend ]
+depends_on = [ aws_ami_from_instance.frontend ]
 }
 
-resource "aws_lb_target_group" "backend" {
+resource "aws_lb_target_group" "frontend" {
   name     = local.resource_name
-  port     = 8080
+  port     = 80
   protocol = "HTTP"
   vpc_id   = local.vpc_id
   deregistration_delay = 60
@@ -75,21 +75,21 @@ resource "aws_lb_target_group" "backend" {
     unhealthy_threshold = 2
     timeout = 5
     protocol = "HTTP"
-    port = 8080
-    path = "/health"
+    port = 80
+    path = "/"
     matcher = "200-299"
     interval = 10
   }
 }
 
-resource "aws_launch_template" "backend" {
+resource "aws_launch_template" "frontend" {
   name = local.resource_name
-  image_id = aws_ami_from_instance.backend.id
+  image_id = aws_ami_from_instance.frontend.id
   instance_initiated_shutdown_behavior = "terminate"
   instance_type = "t3.micro"
   update_default_version = true
 
-  vpc_security_group_ids = [local.backend_sg_id]
+  vpc_security_group_ids = [local.frontend_sg_id]
 
   tag_specifications {
     resource_type = "instance"
@@ -100,19 +100,19 @@ resource "aws_launch_template" "backend" {
   }
 }
 
-resource "aws_autoscaling_group" "backend" {
+resource "aws_autoscaling_group" "frontend" {
   name                      = local.resource_name
   max_size                  = 10
   min_size                  = 1
-  health_check_grace_period = 180 
+  health_check_grace_period = 180
   health_check_type         = "ELB"
   desired_capacity          = 1
-  target_group_arns = [aws_lb_target_group.backend.arn]
+  target_group_arns = [aws_lb_target_group.frontend.arn]
   launch_template {
-    id      = aws_launch_template.backend.id
+    id      = aws_launch_template.frontend.id
     version = "$Latest"
   }
-  vpc_zone_identifier       = local.private_subnet_ids
+  vpc_zone_identifier       = local.public_subnet_ids
   instance_refresh {
     strategy = "Rolling"
     preferences {
@@ -144,10 +144,11 @@ resource "aws_autoscaling_group" "backend" {
   }
 }
 
-resource "aws_autoscaling_policy" "backend" {
+
+resource "aws_autoscaling_policy" "bat" {
   name                   = "${local.resource_name}"
   policy_type            = "TargetTrackingScaling"
-  autoscaling_group_name = aws_autoscaling_group.backend.name
+  autoscaling_group_name = aws_autoscaling_group.frontend.name
   target_tracking_configuration {
     predefined_metric_specification {
       predefined_metric_type = "ASGAverageCPUUtilization"
@@ -157,18 +158,19 @@ resource "aws_autoscaling_policy" "backend" {
   }
 }
 
-resource "aws_lb_listener_rule" "backend" {
-  listener_arn = data.aws_ssm_parameter.app_alb_listener_arn.value
+
+resource "aws_lb_listener_rule" "frontend" {
+  listener_arn = data.aws_ssm_parameter.web_alb_listener_arn.value
   priority     = 10
 
   action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.backend.arn
+    target_group_arn = aws_lb_target_group.frontend.arn
   }
 
   condition {
     host_header {
-      values = ["backend.app-${var.environment}.${var.domain_name}"]
+      values = ["expense-${var.environment}.${var.domain_name}"]
     }
   }
 }
